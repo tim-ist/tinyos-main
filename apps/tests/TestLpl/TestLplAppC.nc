@@ -42,6 +42,9 @@ configuration TestLplAppC {}
 implementation {
   components MainC, TestLplC as App, LedsC;
   components ActiveMessageC;
+  //components SerialPrintfC;
+  components PrintfC; 
+  components SerialStartC;
   components new TimerMilliC();
 #if defined(PLATFORM_MICA2) || defined(PLATFORM_MICA2DOT)
   components CC1000CsmaRadioC as LplRadio;
@@ -61,6 +64,7 @@ implementation {
   App.AMSend -> ActiveMessageC.AMSend[240];
   App.SplitControl -> ActiveMessageC;
   App.PacketAcknowledgements -> ActiveMessageC;
+  App.Packet -> ActiveMessageC;
   App.Leds -> LedsC;
   App.MilliTimer -> TimerMilliC;
   App.LowPowerListening -> LplRadio;

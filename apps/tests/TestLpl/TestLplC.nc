@@ -30,6 +30,7 @@
  */
 
 #include "Timer.h"
+#include <printf.h>
 
 /**
  * Simple test code for low-power-listening. Sends a sequence of packets,
@@ -41,8 +42,13 @@
  */
 
 
-//#define WITH_ACKS
+#define WITH_ACKS
+#define NUM_MSG 300
 
+
+typedef nx_struct Msg {
+	nx_uint16_t seqn;
+} Msg;
 
 module TestLplC {
   uses {
@@ -54,93 +60,64 @@ module TestLplC {
     interface SplitControl;
     interface LowPowerListening;
     interface PacketAcknowledgements;
+	interface Packet;
   }
 }
 implementation 
 {
   message_t packet;
-  bool locked;
-  uint8_t counter = 0, sendSkip;
+  uint16_t counter = 0;
   int16_t sendInterval;
 
   event void Boot.booted() {
     call SplitControl.start();
   }
 
-  void nextLplState()
-  {
-    switch (counter >> 5) {
-    case 0:
-      sendSkip = 0;
-      sendInterval = 0;
-      call LowPowerListening.setLocalWakeupInterval(0);
-      break;
-    case 1:
-      sendInterval = 100; /* Send to sleepy listener */
-      break;
-    case 2:
-      sendInterval = 250; /* Send to listener like us */
-      call LowPowerListening.setLocalWakeupInterval(sendInterval);
-      break;
-    case 3:
-      sendInterval = 0; /* Send to awake listener */
-      break;
-    case 4:
-      sendInterval = 10; /* Send to listener like us */
-      call LowPowerListening.setLocalWakeupInterval(sendInterval);
-      break;
-    case 5:
-      sendSkip = 7; /* Send every 7s */
-      sendInterval = 2000; /* Send to listener like us */
-      call LowPowerListening.setLocalWakeupInterval(sendInterval);
-      break;
-    }
-  }
-
   event void MilliTimer.fired()
   {
     am_addr_t dst;
-    counter++;
-    if (!(counter & 31))
-      nextLplState();
+	Msg* msg = call Packet.getPayload(&packet, sizeof(Msg));
 
-    if (!locked && ((counter & sendSkip) == sendSkip))
-    {
-      if (sendInterval >= 0)
-        call LowPowerListening.setRemoteWakeupInterval(&packet, sendInterval);
+	msg->seqn = counter;
+    call LowPowerListening.setRemoteWakeupInterval(&packet, sendInterval);
 
 #ifdef WITH_ACKS
-      call PacketAcknowledgements.requestAck(&packet);
-      dst = TOS_NODE_ID == 1 ? 2 : 1;
+    call PacketAcknowledgements.requestAck(&packet);
+    dst = TOS_NODE_ID == 1 ? 2 : 1;
 #endif
 
-      if (call AMSend.send(dst, &packet, 0) == SUCCESS)
-      {
-        call Leds.led0On();
-        locked = TRUE;
-      }
+    if (call AMSend.send(dst, &packet, sizeof(Msg)) == SUCCESS)
+    {
+      call Leds.led0On();
     }
+    counter++;
   }
 
   event message_t* Receive.receive(message_t* bufPtr, 
                    void* payload, uint8_t len)
   {
     call Leds.led1Toggle();
+	printf("Recv seqn %d\n", ((Msg*)payload)->seqn);
+	printfflush();
     return bufPtr;
   }
 
   event void AMSend.sendDone(message_t* bufPtr, error_t error)
   {
     if (&packet == bufPtr)
-    {
-      locked = FALSE;
       call Leds.led0Off();
-    }
+
+	if (counter >= NUM_MSG)
+		call MilliTimer.stop();
+
   }
 
   event void SplitControl.startDone(error_t err)
   {
-    call MilliTimer.startPeriodic(1024);
+    sendInterval = 125; 
+    call LowPowerListening.setLocalWakeupInterval(sendInterval);
+	if (TOS_NODE_ID == 1)
+    	call MilliTimer.startPeriodic(1024);
   }
 
   event void SplitControl.stopDone(error_t err) { }
